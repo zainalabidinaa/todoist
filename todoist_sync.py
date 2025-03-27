@@ -113,11 +113,6 @@ def sync_calendar_to_todoist():
     skipping events that have already been added.
     """
     api = TodoistAPI(TODOIST_API_TOKEN)
-    try:
-        api.sync() # This might not be necessary with the new library, but keep it for now
-    except Exception as e:
-        print(f"Error syncing with Todoist API: {e}")
-        return
 
     user_cal = load_calendar(USER_ICS_URL)
     schema_cal = load_calendar(SCHEMA_ICS_URL)
@@ -167,7 +162,7 @@ def sync_calendar_to_todoist():
             try:
                 task = api.add_task(
                     content=new_title,
-                    due_string=new_dtstart.isoformat(), # Use due_string for date and time
+                    due_string=new_dtstart.isoformat(),
                     description=comp.get('location', '') + "\n" + comp.get('description', ''),
                 )
                 newly_added_events.add(event_id)
