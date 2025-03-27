@@ -22,6 +22,83 @@ client = MongoClient(MONGO_URI)
 db = client[DATABASE_NAME]
 added_events_collection = db[COLLECTION_NAME]
 
+def load_calendar(url):
+    """Loads an iCalendar from a given URL."""
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an exception for bad status codes
+        return Calendar.from_ical(response.text)
+    except requests.exceptions.RequestException as e:
+        print(f"Error loading calendar from {url}: {e}")
+        return None
+
+def clean_text(text):
+    """Removes extra whitespace and converts to lowercase for comparison."""
+    return re.sub(r'\s+', ' ', text).strip().lower()
+
+def extract_lecture_title(summary):
+    """
+    Attempts to extract the central part of the lecture title.
+    Example:
+      "Program: ... Laboratoriemedicin vår T3 [BMA401 VT25]" -> "laboratoriemedicin vår t3"
+    If "laboratoriemedicin" is found, returns text from that word
+    until "sign:" or "moment:" if present.
+    Otherwise, returns the entire summary.
+    """
+    summary_clean = clean_text(summary)
+    idx = summary_clean.find("laboratoriemedicin")
+    if idx != -1:
+        sub = summary_clean[idx:]
+        m = re.search(r'(sign:|moment:)', sub)
+        if m:
+            return sub[:m.start()].strip()
+        else:
+            return sub.strip()
+    return summary.strip()
+
+def find_schema_times(user_event, schema_events):
+    """
+    For an event in the user's calendar with only a date (no time),
+    searches the schema calendar for an event with the same date
+    where the cleaned title (based on extract_lecture_title) matches (substring).
+    Returns (dtstart, dtend) from the schema event if a match is found, otherwise None.
+    """
+    dtstart_field = user_event.get('dtstart')
+    if not dtstart_field:
+        return None
+    user_date = dtstart_field.dt if isinstance(dtstart_field.dt, datetime.date) else dtstart_field.dt.date()
+    user_title = extract_lecture_title(user_event.get('summary', ''))
+
+    for se in schema_events:
+        schema_dtstart = se.get('dtstart')
+        if not isinstance(schema_dtstart.dt, datetime.datetime):
+            continue
+        schema_date = schema_dtstart.dt.date()
+        if schema_date == user_date:
+            schema_title = extract_lecture_title(se.get('summary', ''))
+            if (user_title in schema_title) or (schema_title in user_title):
+                return se.get('dtstart').dt, se.get('dtend').dt
+    return None
+
+def adjust_zoom_title(title, event):
+    """
+    If the event's location or description contains "zoom" (lowercase),
+    adds "Zoom " to the beginning of the title (if it's not already there).
+    """
+    loc = event.get('location', '')
+    desc = event.get('description', '')
+    if ("zoom" in loc.lower()) or ("zoom meeting" in desc.lower()):
+        if not title.lower().startswith("zoom "):
+            return "Zoom " + title
+    return title
+
+def generate_event_id(event):
+    """Generates a unique identifier for an event based on its summary and start time."""
+    summary = event.get('summary', '')
+    dtstart_field = event.get('dtstart')
+    dtstart_str = str(dtstart_field.dt) if dtstart_field else ''
+    return f"{summary}-{dtstart_str}"
+
 def is_event_added(event_id):
     """Checks if an event has already been added to MongoDB."""
     return added_events_collection.find_one({"event_id": event_id}) is not None
@@ -29,8 +106,6 @@ def is_event_added(event_id):
 def mark_event_as_added(event_id):
     """Adds an event ID to MongoDB."""
     added_events_collection.insert_one({"event_id": event_id})
-
-# ... (rest of your functions like load_calendar, clean_text, etc.) ...
 
 def sync_calendar_to_todoist():
     """
@@ -47,7 +122,6 @@ def sync_calendar_to_todoist():
         return
 
     schema_events = [comp for comp in schema_cal.walk() if comp.name == "VEVENT"]
-    newly_added_events = set()
 
     for comp in user_cal.walk():
         if comp.name != "VEVENT":
@@ -90,7 +164,6 @@ def sync_calendar_to_todoist():
                     description=comp.get('location', '') + "\n" + comp.get('description', ''),
                 )
                 mark_event_as_added(event_id)
-                newly_added_events.add(event_id)
                 print(f"Added task: {new_title} ({new_dtstart.isoformat()}) - Task ID: {task.id}")
             except Exception as e:
                 print(f"Error adding task to Todoist: {e}")
