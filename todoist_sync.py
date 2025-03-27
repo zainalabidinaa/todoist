@@ -2,14 +2,18 @@ import requests
 import datetime
 import re
 from icalendar import Calendar, Event
-from todoist.api import TodoistAPI
+from todoist_api_python.api import TodoistAPI
 import os
 
 # --- Configuration ---
-TODOIST_API_TOKEN = "725390b405f75c6f5367e9ccf8dfd4657da8acb2"  # Replace with your actual Todoist API token
-USER_ICS_URL = "https://hkr.instructure.com/feeds/calendars/user_xOrYwkKlKq1lm1iOXuRabKHLhfIVId0kLKCCs7C4.ics"  # Replace with your Instructure ICS URL
-SCHEMA_ICS_URL = "https://schema.hkr.se/setup/jsp/SchemaICAL.ics?startDatum=2025-03-13&intervallTyp=a&intervallAntal=1&sokMedAND=false&sprak=SV&resurser=k.BMA451%202025%2004%20100%20DAG%20NML%20sv-%2C"  # Replace with your Schema ICS URL
+TODOIST_API_TOKEN = os.environ.get("TODOIST_API_TOKEN")
+USER_ICS_URL = os.environ.get("USER_ICS_URL")
+SCHEMA_ICS_URL = os.environ.get("SCHEMA_ICS_URL")
 ADDED_EVENTS_FILE = "added_events.txt"  # File to track already added events
+
+if not TODOIST_API_TOKEN or not USER_ICS_URL or not SCHEMA_ICS_URL:
+    print("Error: Please set the TODOIST_API_TOKEN, USER_ICS_URL, and SCHEMA_ICS_URL environment variables in Render/GitHub Secrets.")
+    exit()
 
 def load_calendar(url):
     """Loads an iCalendar from a given URL."""
@@ -110,7 +114,7 @@ def sync_calendar_to_todoist():
     """
     api = TodoistAPI(TODOIST_API_TOKEN)
     try:
-        api.sync()
+        api.sync() # This might not be necessary with the new library, but keep it for now
     except Exception as e:
         print(f"Error syncing with Todoist API: {e}")
         return
@@ -161,14 +165,13 @@ def sync_calendar_to_todoist():
 
         if event_id not in added_events:
             try:
-                api.add_task(
+                task = api.add_task(
                     content=new_title,
-                    due_date_utc=new_dtstart.isoformat(),
-                    due_time_utc=new_dtstart.isoformat(), # Include time for specific timing
+                    due_string=new_dtstart.isoformat(), # Use due_string for date and time
                     description=comp.get('location', '') + "\n" + comp.get('description', ''),
                 )
                 newly_added_events.add(event_id)
-                print(f"Added task: {new_title} ({new_dtstart.isoformat()})")
+                print(f"Added task: {new_title} ({new_dtstart.isoformat()}) - Task ID: {task.id}")
             except Exception as e:
                 print(f"Error adding task to Todoist: {e}")
         else:
